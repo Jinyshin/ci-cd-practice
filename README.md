@@ -1,20 +1,24 @@
-# CI/CD Practice
+# Blue/Green Deployment with GitHub Actions
 
-GitHub Actions를 사용한 CI/CD 파이프라인 실습 프로젝트입니다.
+Blue/Green 배포 전략을 사용하여 트래픽을 신규 컨테이너로 전환함으로써 서비스 중단 없이 안정적으로 애플리케이션을 배포하는 CI/CD 파이프라인 구현 프로젝트입니다.
 
-## 프로젝트 개요
+## 개요
 
-간단한 Express.js 애플리케이션을 통해 **지속적 통합(CI)** 과 **지속적 배포(CD)** 를 구현한 프로젝트입니다.
-코드가 `main` 브랜치에 푸시되면 자동으로 테스트를 실행하고, Docker 이미지를 빌드하여 AWS EC2에 배포합니다.
+이 프로젝트는 다음과 같은 기술 스택을 사용합니다:
 
-## 기술 스택
-
-- **Runtime**: Node.js 22
-- **Framework**: Express.js
-- **Testing**: Jest, Supertest
+- **애플리케이션**: Node.js + Express
+- **컨테이너화**: Docker, Docker Compose
+- **리버스 프록시**: Nginx
 - **CI/CD**: GitHub Actions
-- **Containerization**: Docker
-- **Deployment**: AWS EC2
+- **배포 전략**: Blue/Green Deployment
+- **인프라**: AWS EC2
+
+## 사전 준비
+
+- AWS EC2 인스턴스 (Ubuntu)
+- Docker Hub 계정
+- GitHub Repository
+- SSH 키 페어
 
 ## 프로젝트 구조
 
@@ -23,151 +27,207 @@ ci-practice/
 ├── .github/
 │   └── workflows/
 │       └── ci-cd.yml          # GitHub Actions 워크플로우
-├── tests/
-│   └── app.test.js            # 테스트 파일
-├── app.js                      # Express 애플리케이션
-├── Dockerfile                  # Docker 이미지 빌드 설정
-├── package.json
+├── app.js                     # Express 애플리케이션
+├── Dockerfile                 # 도커 이미지 빌드 설정
+├── .dockerignore              # 도커 빌드 제외 파일
+├── package.json               # Node.js 의존성
 └── README.md
 ```
 
-## 주요 기능
-
-### 1. Continuous Integration (CI)
-
-- **자동 테스트**: `main` 브랜치에 Push 또는 Pull Request 시 자동 테스트 실행
-- **멀티 버전 테스트**: Node.js 19.x, 20.x, 22.x 환경에서 병렬 테스트
-
-### 2. Continuous Deployment (CD)
-
-- **Docker 이미지 빌드**: 테스트 통과 시 자동으로 Docker 이미지 빌드
-- **Docker Hub 푸시**: 빌드된 이미지를 Docker Hub에 자동 업로드
-- **자동 배포**: EC2 인스턴스에 SSH 접속하여 Docker Compose로 배포
-
-## CI/CD 파이프라인 흐름
+**EC2 서버 (`~/bluegreen/`):**
 
 ```
-1. 코드 Push (main 브랜치)
-   ↓
-2. 테스트 실행 (Jest)
-   - Node.js 19.x
-   - Node.js 20.x
-   - Node.js 22.x
-   ↓
-3. Docker 이미지 빌드 및 푸시
-   ↓
-4. EC2 배포
-   - SSH 접속
-   - Docker Compose로 컨테이너 업데이트
+bluegreen/
+├── docker-compose.yml         # Blue/Green 컨테이너 및 Nginx 설정
+└── nginx.conf                 # Nginx 리버스 프록시 설정
 ```
 
-## 로컬 실행 방법
+## 설정 가이드
 
-### 1. 의존성 설치
+### 1. GitHub Secret 환경 변수 등록
+
+GitHub Repository의 `Settings` > `Secrets and variables` > `Actions`에서 다음 환경 변수를 등록합니다:
+
+```
+DOCKER_USERNAME=your-dockerhub-username
+DOCKER_TOKEN=your-dockerhub-access-token
+
+SERVER_USER=ubuntu
+SERVER_HOST=your-ec2-public-ip
+
+SSH_PRIVATE_KEY=
+-----BEGIN RSA PRIVATE KEY-----
+your-private-key-content
+-----END RSA PRIVATE KEY-----
+```
+
+### 2. EC2 보안 그룹 설정
+
+**중요**: 인바운드 규칙에서 다음 포트를 허용해야 합니다.
+
+- AWS EC2 콘솔 → 인스턴스 선택 → 보안 그룹 → 인바운드 규칙 편집
+- **SSH**: TCP, Port 22 (GitHub Actions 배포용)
+- **HTTP**: TCP, Port 80 (애플리케이션 접근용)
+
+### 3. Docker 네트워크 생성
+
+EC2 서버에 SSH 접속 후, Blue/Green 컨테이너와 Nginx가 서로 통신할 수 있도록 공통 네트워크를 생성합니다:
 
 ```bash
-npm install
+docker network create backend-proxy
 ```
 
-### 2. 애플리케이션 실행
+### 4. Docker Compose 설정
+
+EC2 서버에서 작업 디렉토리를 생성하고 `docker-compose.yml` 파일을 작성합니다:
 
 ```bash
-npm start
+mkdir -p /home/ubuntu/bluegreen && cd /home/ubuntu/bluegreen
+vi docker-compose.yml
 ```
 
-서버가 실행되면 `http://localhost:3000`에서 "Hello, World!"를 확인할 수 있습니다.
-
-### 3. 테스트 실행
-
-```bash
-npm test
-```
-
-## GitHub Actions 설정
-
-### 필수 Secrets
-
-GitHub 리포지토리의 Settings > Secrets and variables > Actions에 다음 값을 등록해야 합니다:
-
-| Secret 이름       | 설명                   | 예시                                    |
-| ----------------- | ---------------------- | --------------------------------------- |
-| `DOCKER_USERNAME` | Docker Hub 사용자 이름 | `your-username`                         |
-| `DOCKER_TOKEN`    | Docker Hub 액세스 토큰 | Docker Hub에서 발급                     |
-| `SSH_PRIVATE_KEY` | EC2 SSH 프라이빗 키    | `~/.ssh/id_rsa` 내용                    |
-| `SERVER_HOST`     | EC2 퍼블릭 DNS         | `ec2-xx-xx-xx-xx.compute.amazonaws.com` |
-| `SERVER_USER`     | EC2 사용자 이름        | `ubuntu`                                |
-
-### Actions 권한 설정
-
-Settings > Actions > General에서:
-
-- **Actions permissions**: `Allow all actions and reusable workflows` 선택
-- **Workflow permissions**: `Read and write permissions` 선택
-
-## AWS EC2 배포 설정
-
-### 1. Docker 설치 (EC2)
-
-```bash
-sudo apt-get update
-sudo apt-get install -y docker.io docker-compose-plugin
-sudo usermod -aG docker ubuntu
-```
-
-### 2. 프로젝트 디렉토리 생성 (EC2)
-
-```bash
-mkdir -p /home/ubuntu/backend
-cd /home/ubuntu/backend
-```
-
-### 3. docker-compose.yml 작성 (EC2)
+**docker-compose.yml:**
 
 ```yaml
 services:
-  express-hello-world:
-    image: your-username/express-hello-world:latest
+  express-healthcheck-blue:
+    image: yourdockerhub/express-healthcheck:latest
+    container_name: express-healthcheck-blue
+    restart: always
     ports:
-      - "3000:3000"
-    container_name: express-hello-world
+      - "3001:3000"
+    networks:
+      - backend-proxy
+
+  express-healthcheck-green:
+    image: yourdockerhub/express-healthcheck:latest
+    container_name: express-healthcheck-green
+    restart: always
+    ports:
+      - "3002:3000"
+    networks:
+      - backend-proxy
+
+  nginx-proxy:
+    image: nginx:stable-alpine
+    container_name: nginx-proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - backend-proxy
+
+networks:
+  backend-proxy:
+    external: true
 ```
 
-### 4. 보안 그룹 설정
+### 5. Nginx 설정
 
-AWS EC2 인스턴스의 보안 그룹에서 다음 포트를 개방해야 합니다:
+동일한 디렉토리에 `nginx.conf` 파일을 생성합니다:
 
-- **TCP 22번 포트**: GitHub Actions가 SSH로 배포 명령 실행
-- **TCP 3000번 포트**: 브라우저에서 애플리케이션 접근
-
-## 워크플로우 단계별 설명
-
-### Job 1: Test
-
-다양한 Node.js 버전에서 애플리케이션 테스트를 실행합니다.
-
-```yaml
-- 코드 체크아웃
-- Node.js 환경 설정
-- 의존성 설치
-- 테스트 실행
+```bash
+vi nginx.conf
 ```
 
-### Job 2: Build and Push Image
+**nginx.conf:**
 
-테스트 통과 후 Docker 이미지를 빌드하고 Docker Hub에 푸시합니다.
+```nginx
+server {
+    listen 80;
+    server_name _;
 
-```yaml
-- Docker Hub 로그인
-- Docker 이미지 빌드 (linux/amd64)
-- Docker Hub에 푸시
+    location / {
+        proxy_pass http://express-healthcheck-blue:3000;  # 시작은 blue
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 ```
 
-### Job 3: Deploy
+### 6. 파일 권한 설정
 
-EC2 인스턴스에 최신 이미지를 배포합니다.
+GitHub Actions가 SSH로 접속하는 계정의 소유권을 설정합니다:
 
-```yaml
-- SSH 키 준비
-- Docker/Node.js 설치 확인 (미설치 시 자동 설치)
-- Docker Compose로 컨테이너 업데이트
+```bash
+sudo chown -R ubuntu:ubuntu /home/ubuntu/
+```
+
+**Docker 권한 부여:**
+
+```bash
+sudo usermod -aG docker ubuntu
+sudo reboot
+```
+
+## 배포 프로세스
+
+1. **코드 푸시**: `main` 브랜치에 코드를 푸시하면 GitHub Actions 워크플로우가 자동으로 실행됩니다.
+
+2. **이미지 빌드 및 푸시**: Docker 이미지를 빌드하고 Docker Hub에 푸시합니다.
+
+3. **Blue/Green 전환**:
+
+   - 현재 실행 중인 컨테이너 확인 (Blue 또는 Green)
+   - 새로운 컨테이너 실행
+   - Health Check 수행 (최대 10회, 각 2초 간격)
+   - Health Check 성공 시 Nginx 설정을 새 컨테이너로 전환
+   - 이전 컨테이너 종료
+
+4. **롤백**: Health Check 실패 시 자동으로 이전 컨테이너로 롤백됩니다.
+
+### 배포 흐름 예시
+
+```
+최초 배포: Blue 컨테이너 실행
+재배포 1: Green 컨테이너 실행 → Health Check → Nginx 전환 → Blue 중지
+재배포 2: Blue 컨테이너 실행 → Health Check → Nginx 전환 → Green 중지
+재배포 3: Green 컨테이너 실행 → Health Check → Nginx 전환 → Blue 중지
+...
+```
+
+## 무중단 배포 테스트
+
+배포가 정말 무중단으로 이루어지는지 확인하려면, 로컬에서 반복 요청을 보내면서 재배포를 진행합니다:
+
+```bash
+while true; do curl -s http://[EC2-PUBLIC-IP]/health; sleep 0.5; done
+```
+
+정상적인 경우 다음과 같이 응답이 끊김 없이 계속 출력됩니다:
+
+```
+OK - 15:23:01
+OK - 15:23:01
+OK - 15:23:02
+OK - 15:23:02
+OK - 15:23:03
+...
+```
+
+**배포 중 컨테이너 상태 확인:**
+
+EC2 서버에서 `docker ps`를 반복 실행하면 다음과 같은 변화를 관찰할 수 있습니다:
+
+```bash
+# 배포 시작 전: Blue만 실행 중
+CONTAINER ID   IMAGE                                 STATUS          NAMES
+fc125b3d3147   jinyshin/express-healthcheck:latest   Up 33 minutes   express-healthcheck-blue
+0b0914c245ec   nginx:stable-alpine                   Up 4 minutes    nginx-proxy
+
+# 배포 중: Blue와 Green 모두 실행 중 (Health Check 진행)
+CONTAINER ID   IMAGE                                 STATUS          NAMES
+6125896c1900   jinyshin/express-healthcheck:latest   Up 2 minutes    express-healthcheck-green
+fc125b3d3147   jinyshin/express-healthcheck:latest   Up 35 minutes   express-healthcheck-blue
+0745ae2a2284   nginx:stable-alpine                   Up 2 minutes    nginx-proxy
+
+# 배포 완료: Green만 실행 중 (Blue 종료됨)
+CONTAINER ID   IMAGE                                 STATUS          NAMES
+a9a638414fc4   jinyshin/express-healthcheck:latest   Up 15 seconds   express-healthcheck-green
+8c2369258d7f   nginx:stable-alpine                   Up 12 seconds   nginx-proxy
 ```
